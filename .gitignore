@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.local
+
+# Docker volumes
+pg_data/
+prometheus_data/
+grafana_data/
+
+# PgBouncer config (keep examples)
+pgbouncer/pgbouncer.ini
+pgbouncer/userlist.txt
+
+# Backups and logs
+*.sql
+*.sql.gz
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Misc
+backup*
+restore*
