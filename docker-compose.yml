@@ -79,6 +79,11 @@ services:
     command:
       - "--web.listen-address=:9127"
       - "--pgBouncer.connectionString=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=disable"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
@@ -155,6 +160,11 @@ services:
       - "8080:8080"
     networks:
       - db_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
 
   dozzle:
     image: amir20/dozzle:latest
@@ -167,6 +177,11 @@ services:
       - ./dozzle/users.yml:/data/users.yml:rw
     ports:
       - "8888:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
 
   backup:
     image: prodrigestivill/postgres-backup-local
@@ -181,6 +196,11 @@ services:
       - ./backups:/backups
     networks:
       - db_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
 
 networks:
   db_net:
