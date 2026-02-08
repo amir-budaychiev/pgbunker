@@ -74,8 +74,6 @@ services:
       - pgbouncer
     networks:
       - db_net
-    ports:
-      - "9127:9127"
     command:
       - "--web.listen-address=:9127"
       - "--pgBouncer.connectionString=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=disable"
@@ -90,9 +88,9 @@ services:
     restart: unless-stopped
     volumes:
       # TODO: for Ubuntu use this one
-      #- /:/host:ro,rslave
+      - /:/host:ro,rslave
       # TODO: for MacOS use this one
-      - /:/host:ro
+      #- /:/host:ro
     command:
       - '--path.rootfs=/host'
     networks:
@@ -210,4 +208,3 @@ volumes:
   pg_data:
   prometheus_data:
   grafana_data:
-  portainer_data:

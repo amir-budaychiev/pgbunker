@@ -64,6 +64,26 @@ Prometheus datasource is provisioned automatically. Import the dashboards manual
 3. Upload `grafana/pgbunker-db.json` — PostgreSQL & PgBouncer (connections, cache hit ratio, TPS, pool status)
 4. Upload `grafana/pgbunker-system.json` — system resources (CPU, RAM, swap, disk, network)
 
+### Dashboard Overview
+
+**pgbunker-db.json** monitors:
+- Active connections and connection limits
+- Queries per second (QPS)
+- Query execution time distribution
+- Cache hit ratio (should be >99%)
+- Slow queries (queries >1s)
+- Replication lag (if applicable)
+- Index usage and efficiency
+- Disk usage trends
+
+**pgbunker-system.json** monitors:
+- CPU utilization
+- Memory usage (RSS, cache)
+- Disk I/O (read/write latency)
+- Network throughput
+- Disk space remaining
+- System load average
+
 ## PostgreSQL Tuning
 
 Default parameters in `.env.example` target 2 vCPU / 4GB RAM. Adjust for your server:
