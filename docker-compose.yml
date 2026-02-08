@@ -184,6 +184,7 @@ services:
 
   backup:
     image: prodrigestivill/postgres-backup-local
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB}
