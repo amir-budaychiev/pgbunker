@@ -9,16 +9,24 @@ auth_type = plain
 auth_file = /etc/pgbouncer/userlist.txt
 
 pool_mode = transaction
-max_client_conn = 1000
-default_pool_size = 50
+max_client_conn = 200
+default_pool_size = 20
 min_pool_size = 5
-reserve_pool_size = 10
+reserve_pool_size = 5
 
 server_reset_query = DISCARD ALL
+server_check_delay = 30
+server_lifetime = 3600
+server_idle_timeout = 600
+
 ignore_startup_parameters = extra_float_digits
 
 admin_users = john
 stats_users = john
+
+log_connections = 1
+log_disconnections = 1
+log_pooler_errors = 1
 
 logfile = /dev/stdout
 pidfile = /var/run/pgbouncer/pgbouncer.pid

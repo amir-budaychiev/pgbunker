@@ -28,5 +28,8 @@ Thumbs.db
 *~
 
 # Misc
-backup*
+backup/
 restore*
+
+# Dozzle
+dozzle/users.yml

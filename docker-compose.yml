@@ -34,61 +34,23 @@ services:
         max-size: "50m"
         max-file: "7"
 
-  # TODO: Uncomment to mount and use pgbouncer.ini and userlist.txt for configuration
-  # pgbouncer:
-  #   image: edoburu/pgbouncer:v1.24.1-p1
-  #   # container_name: pgbouncer
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - postgres
-  #   volumes:
-  #     - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-  #     - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
-  #   ports:
-  #     - "${PGBOUNCER_LISTEN_PORT}:6432"
-  #   networks:
-  #     - db_net
-  #   logging:
-  #     driver: "json-file"
-  #     options:
-  #       max-size: "50m"
-  #       max-file: "7"
-
   pgbouncer:
     image: edoburu/pgbouncer:v1.24.1-p1
     restart: unless-stopped
     depends_on:
-      - postgres
-    environment:
-      DB_HOST: ${POSTGRES_HOST}
-      DB_PORT: ${POSTGRES_PORT}
-      DB_USER: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
-
-      LISTEN_PORT: ${PGBOUNCER_LISTEN_PORT}
-
-      POOL_MODE: ${PGBOUNCER_POOL_MODE}
-
-      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-500}
-      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-50}
-      MIN_POOL_SIZE: ${PGBOUNCER_MIN_POOL_SIZE:-5}
-      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
-
-      AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE}
-      ADMIN_USERS: ${PGBOUNCER_ADMIN_USERS}
-
+     - postgres
+    volumes:
+     - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+     - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     ports:
-      - "${PGBOUNCER_LISTEN_PORT}:${PGBOUNCER_LISTEN_PORT}"
-
+     - "${PGBOUNCER_LISTEN_PORT}:6432"
     networks:
-      - db_net
-
+     - db_net
     logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "7"
+     driver: "json-file"
+     options:
+       max-size: "50m"
+       max-file: "7"
 
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
@@ -123,9 +85,9 @@ services:
     restart: unless-stopped
     volumes:
       # TODO: for Ubuntu use this one
-       - /:/host:ro,rslave
+      #- /:/host:ro,rslave
       # TODO: for MacOS use this one
-#      - /:/host:ro
+      - /:/host:ro
     command:
       - '--path.rootfs=/host'
     networks:
@@ -194,6 +156,32 @@ services:
     networks:
       - db_net
 
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle_logs
+    restart: unless-stopped
+    environment:
+      DOZZLE_AUTH_PROVIDER: simple
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle/users.yml:/data/users.yml:rw
+    ports:
+      - "8888:8080"
+
+  backup:
+    image: prodrigestivill/postgres-backup-local
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SCHEDULE: "@every 1d"
+      BACKUP_KEEP_DAYS: 7
+    volumes:
+      - ./backups:/backups
+    networks:
+      - db_net
+
 networks:
   db_net:
     driver: bridge
@@ -202,3 +190,4 @@ volumes:
   pg_data:
   prometheus_data:
   grafana_data:
+  portainer_data:
