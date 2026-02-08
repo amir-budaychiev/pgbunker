@@ -64,7 +64,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "20m"
+        max-size: "50m"
         max-file: "7"
 
   pgbouncer-exporter:
@@ -100,7 +100,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
+        max-size: "50m"
         max-file: "7"
 
   prometheus:
