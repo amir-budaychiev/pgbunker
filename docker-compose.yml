@@ -168,7 +168,6 @@ services:
 
   dozzle:
     image: amir20/dozzle:latest
-    container_name: dozzle_logs
     restart: unless-stopped
     environment:
       DOZZLE_AUTH_PROVIDER: simple
