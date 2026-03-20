@@ -29,6 +29,7 @@ Thumbs.db
 
 # Misc
 backup/
+backups/
 restore*
 
 # Dozzle

@@ -13,10 +13,10 @@ Tested on a 2-core, 4GB RAM, 60GB NVMe VPS (Ubuntu 24.04). Handles 2-3 productio
 - **PostgreSQL 17** — database with `pg_stat_statements` and production-tuned parameters
 - **PgBouncer 1.24** — connection pooling (transaction mode), critical when multiple apps share one instance
 - **Prometheus + Exporters** — metrics collection: PostgreSQL stats, PgBouncer pools, system resources (CPU, RAM, disk, network)
-- **Grafana 11** — two pre-built dashboards: database metrics and system metrics
+- **Grafana 12** — two pre-built dashboards: database metrics and system metrics
 - **PgHero** — web UI for slow queries, missing indexes, table bloat
 - **Dozzle** — real-time Docker log viewer with auth
-- **Backup** — automated daily pg_dump with 7-day retention
+- **Backup (S3)** — optional profile for automated daily pg_dump to S3-compatible object storage with 7-day retention
 
 ## Quick Start
 
@@ -29,14 +29,30 @@ cd pgbunker
 # 1. Environment
 cp .env.example .env
 nano .env  # set your passwords and DB name
+# macOS only: set NODE_EXPORTER_HOST_MOUNT_OPTIONS=ro
 
 # 2. PgBouncer
 cp pgbouncer/pgbouncer.ini.example pgbouncer/pgbouncer.ini
 cp pgbouncer/userlist.txt.example pgbouncer/userlist.txt
-# replace username/password in both files to match .env
+# only PGBOUNCER_LISTEN_PORT is configured in .env
+# pool_mode, pool sizes and admin users are configured in pgbouncer.ini
+# in pgbouncer.ini replace "john" with your POSTGRES_USER in 3 places:
+#   line: * = host=postgres port=5432 user=YOUR_USER
+#   line: admin_users = YOUR_USER
+#   line: stats_users = YOUR_USER
+# in userlist.txt set your credentials in plain text:
+#   "YOUR_USER" "YOUR_POSTGRES_PASSWORD"
+# restrict file permissions:
+chmod 600 pgbouncer/userlist.txt
 
-# 3. Start
+# 3. Dozzle auth (required — replace YOUR_PASSWORD and YOUR_EMAIL below)
+docker run -it --rm amir20/dozzle:v10.1.1 generate admin --password YOUR_PASSWORD --email YOUR_EMAIL --name "Admin" > dozzle/users.yml
+
+# 4. Start core stack
 docker compose up -d
+
+# 5. Enable S3 backups after you set real S3 credentials
+docker compose --profile backup up -d backup
 ```
 
 ## Access Services
@@ -57,16 +73,11 @@ postgresql://user:password@your-host:6432/dbname
 
 ## Grafana Dashboards
 
-Prometheus datasource is provisioned automatically. Import the dashboards manually:
-
-1. Open Grafana at `http://your-host:3000`
-2. **Dashboards** -> **New** -> **Import**
-3. Upload `grafana/pgbunker-db.json` — PostgreSQL & PgBouncer (connections, cache hit ratio, TPS, pool status)
-4. Upload `grafana/pgbunker-system.json` — system resources (CPU, RAM, swap, disk, network)
+Prometheus datasource and both dashboards are provisioned automatically on startup. Open Grafana at `http://your-host:3000` — dashboards are available under the **PgBunker** folder.
 
 ### Dashboard Overview
 
-**pgbunker-db.json** monitors:
+**DB Overview** monitors:
 - Active connections and connection limits
 - Queries per second (QPS)
 - Query execution time distribution
@@ -76,7 +87,7 @@ Prometheus datasource is provisioned automatically. Import the dashboards manual
 - Index usage and efficiency
 - Disk usage trends
 
-**pgbunker-system.json** monitors:
+**System Overview** monitors:
 - CPU utilization
 - Memory usage (RSS, cache)
 - Disk I/O (read/write latency)
@@ -96,14 +107,33 @@ Default parameters in `.env.example` target 2 vCPU / 4GB RAM. Adjust for your se
 
 Rule of thumb: `shared_buffers` = 25% RAM, `effective_cache_size` = 75% RAM.
 
-## Backups
+## Backups (S3)
 
-Automatic daily backups in `./backups/`, 7-day retention.
+Automatic daily backups are uploaded to your S3-compatible bucket with 7-day retention.
 
-Restore:
+The backup service is in the optional `backup` profile. It does not start until you run:
+
 ```bash
-gunzip < backups/last/dbname-latest.sql.gz \
-  | docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB
+docker compose --profile backup up -d backup
+```
+
+If required S3 values are empty or still use example placeholders, the backup container exits immediately with a clear error.
+
+Required `.env` values:
+- `S3_REGION`
+- `S3_BUCKET`
+- `S3_PREFIX`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_ENDPOINT` (leave empty for AWS S3, set for Cloudflare R2/Backblaze B2/MinIO)
+
+Restore from S3:
+```bash
+aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/YOUR_BACKUP_FILE.sql.gz" - \
+  --region "$S3_REGION" \
+  ${S3_ENDPOINT:+--endpoint-url "$S3_ENDPOINT"} \
+  | gunzip \
+  | docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
 ## Firewall (UFW)
@@ -112,11 +142,17 @@ gunzip < backups/last/dbname-latest.sql.gz \
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp        # SSH
-sudo ufw allow 6432/tcp      # PgBouncer — open for your app servers
+sudo ufw allow 6432/tcp      # PgBouncer — open for app servers
 sudo ufw allow 3000/tcp      # Grafana   — restrict to your IP (see below)
 sudo ufw allow 8080/tcp      # PgHero    — restrict to your IP
 sudo ufw allow 8888/tcp      # Dozzle    — restrict to your IP
 sudo ufw enable
+```
+
+Restrict PgBouncer to specific app server IPs (recommended):
+```bash
+sudo ufw delete allow 6432/tcp
+sudo ufw allow from YOUR_APP_SERVER_IP to any port 6432
 ```
 
 Restrict admin panels to your IP only:
@@ -133,14 +169,6 @@ PostgreSQL (5432) and Prometheus (9090) are not exposed to host — no firewall 
 
 ## Notes
 
-- **Dozzle auth** — generate `users.yml` with bcrypt-hashed password:
-  ```bash
-  docker run -it --rm amir20/dozzle generate admin --password your_password_here --email john@example.com --name "Admin" > dozzle/users.yml
-  ```
-- **node-exporter on Linux (Ubuntu)** — in `docker-compose.yml`, switch the volume mount:
-  ```yaml
-  # for Ubuntu:
-  - /:/host:ro,rslave
-  # for macOS (default):
-  - /:/host:ro
-  ```
+- **node-exporter mount mode** — set once in `.env`:
+  - Linux (Ubuntu, default): `NODE_EXPORTER_HOST_MOUNT_OPTIONS=ro,rslave`
+  - macOS: `NODE_EXPORTER_HOST_MOUNT_OPTIONS=ro`
