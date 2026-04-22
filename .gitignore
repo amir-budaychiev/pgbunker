@@ -7,15 +7,18 @@ pg_data/
 prometheus_data/
 grafana_data/
 
-# PgBouncer config (keep examples)
+# PgBouncer rendered config and generated certs (templates are tracked)
 pgbouncer/pgbouncer.ini
 pgbouncer/userlist.txt
+pgbouncer/certs/*
+!pgbouncer/certs/.gitkeep
 
 # Backups and logs
 *.sql
 *.sql.gz
 *.log
 logs/
+!scripts/init-db.sql
 
 # OS files
 .DS_Store

@@ -1,0 +1,135 @@
+groups:
+  - name: postgres
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "postgres_exporter cannot reach the database for 2 minutes."
+
+      - alert: PostgresTooManyConnections
+        expr: sum(pg_stat_activity_count) by (instance) / on(instance) pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres connections above 80% of max"
+          description: "Active connections are using more than 80% of max_connections."
+
+      - alert: PostgresLowCacheHitRatio
+        expr: |
+          sum(rate(pg_stat_database_blks_hit{datname!~"template.*|postgres"}[5m]))
+          /
+          (sum(rate(pg_stat_database_blks_hit{datname!~"template.*|postgres"}[5m]))
+            + sum(rate(pg_stat_database_blks_read{datname!~"template.*|postgres"}[5m]))) < 0.95
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache hit ratio below 95%"
+          description: "Buffer cache hit ratio is below 95% for 15 minutes. Consider raising shared_buffers."
+
+      - alert: PostgresLongRunningTransaction
+        expr: pg_stat_activity_max_tx_duration{datname!~"template.*"} > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transaction running longer than 5 minutes"
+          description: "A transaction has been open for over 5 minutes, blocking autovacuum and bloating the database."
+
+      - alert: PostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks{datname!~"template.*"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deadlocks detected"
+          description: "Deadlocks occurred in the last 5 minutes."
+
+  - name: pgbouncer
+    rules:
+      - alert: PgBouncerDown
+        expr: pgbouncer_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PgBouncer is down"
+
+      - alert: PgBouncerPoolsSaturated
+        expr: pgbouncer_pools_client_waiting_connections > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Clients waiting for a pool connection"
+          description: "PgBouncer has clients queued waiting for a free server connection. Consider raising default_pool_size."
+
+  - name: node
+    rules:
+      - alert: NodeDiskAlmostFull
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) < 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk free space below 15%"
+
+      - alert: NodeDiskCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) < 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk free space below 5%"
+
+      - alert: NodeMemoryPressure
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage above 90%"
+
+      - alert: NodeHighLoad
+        expr: node_load5 / count(node_cpu_seconds_total{mode="idle"}) without (cpu, mode) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Load average is more than 2x the CPU count"
+
+  - name: targets
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus scrape target is down"
+          description: "Target {{ $labels.job }} / {{ $labels.instance }} has been down for 3 minutes."
+
+  - name: backup
+    rules:
+      - alert: BackupNeverRan
+        expr: absent(pgbunker_backup_last_success_time)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful backup metric seen yet"
+          description: "Either the backup profile has never run or the textfile metric is missing. If S3 backups are enabled, check the backup container logs."
+
+      - alert: BackupStale
+        expr: time() - pgbunker_backup_last_success_time > 172800
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Last successful backup was more than 48h ago"
+          description: "Backup container has not completed a successful run in the last 48 hours. Check logs and S3 credentials."

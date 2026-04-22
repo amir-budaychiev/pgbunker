@@ -1,0 +1,18 @@
+# Rendered by scripts/nginx-setup.sh to /etc/nginx/streams-enabled/pgbunker.conf.
+# nginx-setup.sh also appends a `stream { include /etc/nginx/streams-enabled/*.conf; }`
+# wrapper to /etc/nginx/nginx.conf on first run.
+#
+# This is a plain TCP passthrough. TLS termination happens in PgBouncer itself
+# when PGBOUNCER_TLS=true (certs live in pgbouncer/certs/); nginx never
+# interprets the PostgreSQL wire protocol.
+
+upstream pgbouncer {
+    server 127.0.0.1:6432;
+}
+
+server {
+    listen 6432;
+    proxy_pass            pgbouncer;
+    proxy_connect_timeout 10s;
+    proxy_timeout         1h;
+}

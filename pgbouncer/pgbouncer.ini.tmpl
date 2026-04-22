@@ -1,5 +1,5 @@
 [databases]
-* = host=postgres port=5432 user=john
+* = host=postgres port=5432 user=${POSTGRES_USER}
 
 [pgbouncer]
 listen_addr = 0.0.0.0
@@ -19,10 +19,10 @@ server_check_delay = 30
 server_lifetime = 3600
 server_idle_timeout = 600
 
-ignore_startup_parameters = extra_float_digits
+ignore_startup_parameters = extra_float_digits,application_name,search_path,IntervalStyle
 
-admin_users = john
-stats_users = john
+admin_users = ${POSTGRES_USER}
+stats_users = ${POSTGRES_USER}
 
 log_connections = 1
 log_disconnections = 1

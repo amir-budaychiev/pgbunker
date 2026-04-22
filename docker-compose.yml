@@ -8,10 +8,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
     command:
       - "postgres"
       - "-c"
       - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
       - "-c"
       - "max_connections=${PG_MAX_CONNECTIONS}"
       - "-c"
@@ -25,11 +28,23 @@ services:
       - "-c"
       - "log_min_duration_statement=${PG_LOG_MIN_DURATION_STATEMENT}"
       - "-c"
+      - "log_lock_waits=on"
+      - "-c"
+      - "log_temp_files=0"
+      - "-c"
       - "password_encryption=scram-sha-256"
       - "-c"
       - "autovacuum_max_workers=${PG_AUTOVACUUM_MAX_WORKERS}"
       - "-c"
       - "autovacuum_naptime=${PG_AUTOVACUUM_NAPTIME}"
+      - "-c"
+      - "statement_timeout=${PG_STATEMENT_TIMEOUT}"
+      - "-c"
+      - "idle_in_transaction_session_timeout=${PG_IDLE_IN_TX_TIMEOUT}"
+      - "-c"
+      - "random_page_cost=${PG_RANDOM_PAGE_COST}"
+      - "-c"
+      - "effective_io_concurrency=${PG_EFFECTIVE_IO_CONCURRENCY}"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -38,6 +53,10 @@ services:
       start_period: 30s
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -55,15 +74,21 @@ services:
     volumes:
      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+     - ./pgbouncer/certs:/certs:ro
     ports:
-     - "${PGBOUNCER_LISTEN_PORT}:6432"
+     - "127.0.0.1:${PGBOUNCER_LISTEN_PORT}:6432"
     networks:
      - db_net
     healthcheck:
-      test: ["CMD-SHELL", "PGPASSWORD=${POSTGRES_PASSWORD} psql -h localhost -p 6432 -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c 'SELECT 1' -q --no-align -t 2>/dev/null | grep -q 1"]
+      test: ["CMD-SHELL", "PGPASSWORD=${POSTGRES_PASSWORD} psql -h localhost -p 6432 -U ${POSTGRES_USER} -d pgbouncer -c 'SHOW VERSION' -q --no-align -t 2>/dev/null | grep -qi pgbouncer"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${PGBOUNCER_MEM_LIMIT}
     logging:
      driver: "json-file"
      options:
@@ -84,6 +109,10 @@ services:
       - ./prometheus/postgres_exporter.yml:/etc/postgres_exporter.yml:ro
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_EXPORTER_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -100,7 +129,12 @@ services:
       - db_net
     command:
       - "--web.listen-address=:9127"
-      - "--pgBouncer.connectionString=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=disable"
+      # PGBOUNCER_EXPORTER_SSLMODE is auto-derived from PGBOUNCER_TLS by scripts/setup.sh
+      - "--pgBouncer.connectionString=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=${PGBOUNCER_EXPORTER_SSLMODE}"
+    deploy:
+      resources:
+        limits:
+          memory: ${PGBOUNCER_EXPORTER_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -111,11 +145,22 @@ services:
     image: prom/node-exporter:v1.8.2
     restart: unless-stopped
     volumes:
-      - /:/host:${NODE_EXPORTER_HOST_MOUNT_OPTIONS:-ro,rslave}
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:${NODE_EXPORTER_HOST_MOUNT_OPTIONS:-ro,rslave}
+      - node_textfile:/var/lib/node-textfile:ro
     command:
-      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.textfile.directory=/var/lib/node-textfile'
+      - '--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+|run/docker/netns/.+)($$|/)'
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${NODE_EXPORTER_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -134,6 +179,7 @@ services:
         condition: service_started
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -148,6 +194,10 @@ services:
       retries: 3
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${PROMETHEUS_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -163,13 +213,14 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}/
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
     ports:
-      - "3000:3000"
+      - "${ADMIN_BIND:-127.0.0.1}:3000:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health > /dev/null"]
       interval: 15s
@@ -177,6 +228,10 @@ services:
       retries: 3
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${GRAFANA_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -194,9 +249,13 @@ services:
       PGHERO_USERNAME: ${PGHERO_USERNAME}
       PGHERO_PASSWORD: ${PGHERO_PASSWORD}
     ports:
-      - "8080:8080"
+      - "${ADMIN_BIND:-127.0.0.1}:8080:8080"
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${PGHERO_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -212,7 +271,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./dozzle/users.yml:/data/users.yml:ro
     ports:
-      - "8888:8080"
+      - "${ADMIN_BIND:-127.0.0.1}:8888:8080"
+    deploy:
+      resources:
+        limits:
+          memory: ${DOZZLE_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -245,8 +308,13 @@ services:
     volumes:
       - ./scripts/backup-preflight.sh:/usr/local/bin/backup-preflight.sh:ro
       - ./scripts/backup.sh:/backup.sh:ro
+      - node_textfile:/var/lib/node-textfile
     networks:
       - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKUP_MEM_LIMIT}
     logging:
       driver: "json-file"
       options:
@@ -261,3 +329,4 @@ volumes:
   pg_data:
   prometheus_data:
   grafana_data:
+  node_textfile:
