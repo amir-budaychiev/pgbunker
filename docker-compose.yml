@@ -75,8 +75,10 @@ services:
      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
      - ./pgbouncer/certs:/certs:ro
+    tmpfs:
+     - /var/run/pgbouncer:uid=70,gid=70,mode=0755
     ports:
-     - "127.0.0.1:${PGBOUNCER_LISTEN_PORT}:6432"
+     - "127.0.0.1:${PGBOUNCER_UPSTREAM_PORT:-16432}:6432"
     networks:
      - db_net
     healthcheck:
@@ -105,6 +107,7 @@ services:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
     command:
       - "--config.file=/etc/postgres_exporter.yml"
+      - "--collector.long_running_transactions"
     volumes:
       - ./prometheus/postgres_exporter.yml:/etc/postgres_exporter.yml:ro
     networks:
@@ -148,11 +151,12 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:${NODE_EXPORTER_HOST_MOUNT_OPTIONS:-ro,rslave}
-      - node_textfile:/var/lib/node-textfile:ro
+      - ./prometheus/textfile:/var/lib/node-textfile:ro
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
+      - '--path.udev.data=/tmp'
       - '--collector.textfile.directory=/var/lib/node-textfile'
       - '--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+|run/docker/netns/.+)($$|/)'
     networks:
@@ -308,7 +312,7 @@ services:
     volumes:
       - ./scripts/backup-preflight.sh:/usr/local/bin/backup-preflight.sh:ro
       - ./scripts/backup.sh:/backup.sh:ro
-      - node_textfile:/var/lib/node-textfile
+      - ./prometheus/textfile:/var/lib/node-textfile
     networks:
       - db_net
     deploy:
@@ -329,4 +333,3 @@ volumes:
   pg_data:
   prometheus_data:
   grafana_data:
-  node_textfile:

@@ -1,8 +1,8 @@
 # PgBunker
 
-**Self-hosted Postgres on a small VPS.** One Docker Compose file. Pooling, monitoring, dashboards, backups, logs, and HTTPS — all set up by a single script.
+**Self-hosted Postgres on a small VPS.** One Docker Compose file, plus setup scripts for generated configs, monitoring, backups, logs, HTTPS, and optional public PgBouncer TLS.
 
-Tested on **2 vCPU / 4 GB / 60 GB NVMe Ubuntu 24.04**. Runs on **1 vCPU / 2 GB** and **4 vCPU / 8 GB** with one edit to `.env`.
+Tested on **2 vCPU / 4 GB / 60 GB NVMe Ubuntu 24.04**. Runs on **1 vCPU / 2 GB** and **4 vCPU / 8 GB** by editing only `.env`.
 
 ---
 
@@ -11,7 +11,7 @@ Tested on **2 vCPU / 4 GB / 60 GB NVMe Ubuntu 24.04**. Runs on **1 vCPU / 2 GB**
 | Component            | Version | Purpose                                                  |
 | -------------------- | ------- | -------------------------------------------------------- |
 | PostgreSQL           | 17      | Database, `pg_stat_statements` enabled on first start    |
-| PgBouncer            | 1.24    | Transaction-mode pooler, optional TLS on `:6432`         |
+| PgBouncer            | 1.24    | Transaction-mode pooler, private by default              |
 | Prometheus           | 3.2     | Metrics + 14 alert rules                                 |
 | Grafana              | 12      | DB and System dashboards, provisioned on start           |
 | PgHero               | 3.7     | Slow queries, missing indexes, table bloat               |
@@ -20,9 +20,9 @@ Tested on **2 vCPU / 4 GB / 60 GB NVMe Ubuntu 24.04**. Runs on **1 vCPU / 2 GB**
 | pgbouncer-exporter   | 0.10    | Pool metrics                                             |
 | node-exporter        | 1.8     | Host metrics + textfile collector for backup status      |
 | Backup (S3)          | —       | Daily `pg_dumpall --globals-only` + per-database dump    |
-| Host nginx + certbot | —       | HTTPS for admin UIs, optional TLS for Postgres           |
+| Host nginx + certbot | —       | HTTPS for admin UIs, optional public PgBouncer TLS       |
 
-All containers have memory limits. The only public ports after setup are **22, 80, 443, and 6432** — everything else stays inside the Docker network or on `127.0.0.1`.
+All containers have memory limits. The default public ports after setup are **22, 80, and 443**. PgBouncer stays on `127.0.0.1` unless you explicitly set `PGBOUNCER_PUBLIC=true`.
 
 ---
 
@@ -47,14 +47,15 @@ Before the last command, point these DNS A-records at your VPS:
 grafana.<DOMAIN>
 pghero.<DOMAIN>
 dozzle.<DOMAIN>
-<DOMAIN>                          # only if PGBOUNCER_TLS=true
+<DOMAIN>                          # only if PGBOUNCER_PUBLIC=true and PGBOUNCER_TLS=true
 ```
 
 That's it. Certificates auto-renew via the `certbot.timer` systemd unit that ships with the certbot package — you don't have to schedule anything.
 
-Optional — enable daily S3 backups once `S3_*` values in `.env` are real:
+Optional — enable daily S3 backups once `S3_*` values in `.env` are real. If you also set `BACKUP_ALERTS_ENABLED=true`, re-run `./scripts/setup.sh` first so node-exporter gets the enabled metric:
 
 ```bash
+./scripts/setup.sh
 docker compose --profile backup up -d backup
 ```
 
@@ -62,20 +63,20 @@ docker compose --profile backup up -d backup
 
 ## Services
 
-| Service   | URL                          | Notes                          |
-| --------- | ---------------------------- | ------------------------------ |
-| Grafana   | `https://grafana.<DOMAIN>`   | Credentials from `.env`        |
-| PgHero    | `https://pghero.<DOMAIN>`    | Credentials from `.env`        |
-| Dozzle    | `https://dozzle.<DOMAIN>`    | Docker log viewer              |
-| PgBouncer | `<DOMAIN>:6432` (TCP)        | Application endpoint           |
+| Service   | URL                                      | Notes                          |
+| --------- | ---------------------------------------- | ------------------------------ |
+| Grafana   | `https://grafana.<DOMAIN>`               | Credentials from `.env`        |
+| PgHero    | `https://pghero.<DOMAIN>`                | Credentials from `.env`        |
+| Dozzle    | `https://dozzle.<DOMAIN>`                | Docker log viewer              |
+| PgBouncer | `127.0.0.1:<PGBOUNCER_UPSTREAM_PORT>`   | Private application endpoint   |
 
-App connection string:
+Private connection string on the VPS or through an SSH tunnel:
 
 ```
-postgresql://user:password@<DOMAIN>:6432/dbname
+postgresql://user:password@127.0.0.1:16432/dbname
 ```
 
-With `PGBOUNCER_TLS=true`:
+Public TLS endpoint on the default public port, only after `PGBOUNCER_PUBLIC=true` and `PGBOUNCER_TLS=true`:
 
 ```
 postgresql://user:password@<DOMAIN>:6432/dbname?sslmode=require
@@ -87,29 +88,40 @@ postgresql://user:password@<DOMAIN>:6432/dbname?sslmode=require
 
 Admin UIs are served over HTTPS by host nginx with a multi-SAN Let's Encrypt certificate. Nothing to do after `nginx-setup.sh`.
 
-**TLS for Postgres connections is off by default.** Postgres uses a plaintext handshake to negotiate SSL (it's a protocol quirk), so nginx cannot terminate TLS for it. PgBouncer has to do it itself.
+**Public Postgres access is off by default.** Postgres uses a plaintext handshake to negotiate SSL (it's a protocol quirk), so nginx cannot terminate TLS for it. PgBouncer has to do it itself.
 
-To turn it on, flip one flag:
+To publish PgBouncer with TLS, point the `<DOMAIN>` A-record at the VPS and flip two flags:
 
 ```diff
 # .env
+- PGBOUNCER_PUBLIC=false
++ PGBOUNCER_PUBLIC=true
 - PGBOUNCER_TLS=false
 + PGBOUNCER_TLS=true
 ```
 
-Then re-run the normal three commands. `setup.sh` and `nginx-setup.sh` handle the rest:
-
-1. `setup.sh` adds the TLS block to `pgbouncer.ini` and generates a self-signed placeholder certificate so PgBouncer can start.
-2. `nginx-setup.sh` includes `<DOMAIN>` in the certbot request alongside the admin subdomains, and installs a certbot deploy-hook at `/etc/letsencrypt/renewal-hooks/deploy/pgbunker.sh`. The hook copies renewed certs into `pgbouncer/certs/` and sends `SIGHUP` to PgBouncer. This happens automatically every 60 days for the life of the VPS.
-
-If you don't need TLS — for example, your app and DB live in the same datacenter — keep it off and restrict port 6432 to the app server's IP:
+Then re-run the normal setup commands:
 
 ```bash
-sudo ufw delete allow 6432/tcp
-sudo ufw allow from <APP_SERVER_IP> to any port 6432
+./scripts/setup.sh
+docker compose up -d
+sudo ./scripts/nginx-setup.sh
 ```
 
-SCRAM-SHA-256 still protects the password during authentication.
+`setup.sh` and `nginx-setup.sh` handle the rest:
+
+1. `setup.sh` adds the TLS block to `pgbouncer.ini` and generates a self-signed placeholder certificate so PgBouncer can start.
+2. `nginx-setup.sh` includes `<DOMAIN>` in the certbot request alongside the admin subdomains, installs a certbot deploy-hook at `/etc/letsencrypt/renewal-hooks/deploy/pgbunker.sh`, and opens `PGBOUNCER_PUBLIC_PORT`. The hook copies renewed certs into `pgbouncer/certs/`, restricts the private key permissions, and sends `SIGHUP` to PgBouncer. This happens automatically every 60 days for the life of the VPS.
+
+If you intentionally need a plaintext public PgBouncer endpoint — for example, over a private datacenter network — set an allowlist instead of opening it to the world:
+
+```env
+PGBOUNCER_PUBLIC=true
+PGBOUNCER_TLS=false
+PGBOUNCER_ALLOWED_CIDR=<APP_SERVER_IP>/32
+```
+
+SCRAM-SHA-256 still protects the password during authentication, but query traffic is plaintext. Use this mode only on a trusted private network or a tightly scoped allowlist.
 
 ---
 
@@ -181,12 +193,12 @@ Total cap (no backup running): **~1.8 GB / 3.1 GB / 5.8 GB**. Idle use is typica
 
 ## Backups
 
-Each daily run uploads three kinds of file to your S3 bucket:
+Each daily run uploads two kinds of file to your S3 bucket:
 
 - `globals_<timestamp>.sql.gz` — roles, passwords, tablespaces (`pg_dumpall --globals-only`)
 - `<dbname>_<timestamp>.sql.gz` — one per user database (`pg_dump`)
 
-Every upload is verified with `s3api head-object`. On success the container writes a Prometheus metric (`pgbunker_backup_last_success_time`) to a shared volume read by node-exporter. Two alerts watch it:
+Every upload is verified with `s3api head-object`. On success the container writes a Prometheus metric (`pgbunker_backup_last_success_time`) to the textfile directory read by node-exporter. When `BACKUP_ALERTS_ENABLED=true`, two alerts watch it:
 
 - `BackupNeverRan` — the metric has never been set
 - `BackupStale` — last success was more than 48 hours ago
@@ -194,6 +206,7 @@ Every upload is verified with `s3api head-object`. On success the container writ
 Enable the profile once `S3_*` values in `.env` are real:
 
 ```bash
+./scripts/setup.sh
 docker compose --profile backup up -d backup
 ```
 
@@ -225,7 +238,7 @@ aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/globals_<timestamp>.sql.gz" - \
 
 ## Alerts
 
-`prometheus/alerts.yml` ships 14 rules in 5 groups:
+`prometheus/alerts.yml` ships 14 rules in 5 groups. Backup alerts stay quiet unless `BACKUP_ALERTS_ENABLED=true` was rendered by `./scripts/setup.sh`.
 
 - **postgres** — down, too many connections, low cache hit ratio, long-running transactions, deadlocks
 - **pgbouncer** — exporter down, clients waiting for a pool slot
@@ -250,16 +263,17 @@ Provisioned dashboards are read-only in the UI — the JSON files in the repo ar
 
 ## Firewall
 
-`nginx-setup.sh` configures UFW with the minimum needed:
+`nginx-setup.sh` configures UFW with the minimum needed by default:
 
 ```
 22    SSH
 80    nginx (ACME challenge + HTTP → HTTPS redirect)
 443   nginx (admin UIs)
-6432  nginx stream → PgBouncer
 ```
 
-Everything else — Postgres, Prometheus, all exporters, Grafana, PgHero, Dozzle — binds to `127.0.0.1` or stays inside the Docker bridge. Only nginx talks to the public internet.
+If `PGBOUNCER_PUBLIC=true`, it also enables nginx stream on `PGBOUNCER_PUBLIC_PORT`. With TLS it opens that port publicly; without TLS it requires `PGBOUNCER_ALLOWED_CIDR` and opens the port only for that source.
+
+Everything else — Postgres, Prometheus, all exporters, Grafana, PgHero, Dozzle, and private PgBouncer — binds to `127.0.0.1` or stays inside the Docker bridge. Only nginx talks to the public internet.
 
 ---
 
@@ -275,11 +289,12 @@ pgbunker/
 ├── pgbouncer/
 │   ├── pgbouncer.ini.tmpl
 │   ├── userlist.txt.tmpl
-│   └── certs/                  # filled by setup.sh + nginx-setup.sh
+│   └── certs/                  # filled when PgBouncer TLS is enabled
 ├── prometheus/
 │   ├── prometheus.yml
 │   ├── alerts.yml              # 14 rules
-│   └── postgres_exporter.yml
+│   ├── postgres_exporter.yml
+│   └── textfile/               # node-exporter textfile metrics
 ├── grafana/
 │   └── provisioning/           # datasource + dashboards
 ├── dozzle/

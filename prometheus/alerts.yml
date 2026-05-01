@@ -117,7 +117,7 @@ groups:
   - name: backup
     rules:
       - alert: BackupNeverRan
-        expr: absent(pgbunker_backup_last_success_time)
+        expr: pgbunker_backup_enabled == 1 unless pgbunker_backup_last_success_time
         for: 10m
         labels:
           severity: warning
@@ -126,7 +126,7 @@ groups:
           description: "Either the backup profile has never run or the textfile metric is missing. If S3 backups are enabled, check the backup container logs."
 
       - alert: BackupStale
-        expr: time() - pgbunker_backup_last_success_time > 172800
+        expr: (pgbunker_backup_enabled == 1) and (time() - pgbunker_backup_last_success_time > 172800)
         for: 10m
         labels:
           severity: critical

@@ -6,6 +6,8 @@
 pg_data/
 prometheus_data/
 grafana_data/
+prometheus/textfile/*.prom
+!prometheus/textfile/.gitkeep
 
 # PgBouncer rendered config and generated certs (templates are tracked)
 pgbouncer/pgbouncer.ini

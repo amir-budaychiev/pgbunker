@@ -7,11 +7,11 @@
 # interprets the PostgreSQL wire protocol.
 
 upstream pgbouncer {
-    server 127.0.0.1:6432;
+    server 127.0.0.1:${PGBOUNCER_UPSTREAM_PORT};
 }
 
 server {
-    listen 6432;
+    listen ${PGBOUNCER_PUBLIC_PORT};
     proxy_pass            pgbouncer;
     proxy_connect_timeout 10s;
     proxy_timeout         1h;
