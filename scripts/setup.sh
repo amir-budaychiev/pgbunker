@@ -32,8 +32,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < .env
 
 # ---- sanity-check critical values are not placeholders ----
-placeholders=(your_postgres_password_here your_grafana_password_here your_pghero_password_here)
-for value in "$POSTGRES_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$PGHERO_PASSWORD"; do
+placeholders=(your_postgres_password_here your_panel_password_here)
+for value in "$POSTGRES_PASSWORD" "$PANEL_PASSWORD"; do
   for placeholder in "${placeholders[@]}"; do
     if [ "$value" = "$placeholder" ]; then
       echo "setup: .env still contains placeholder password '$placeholder' — set real values first" >&2
@@ -42,7 +42,7 @@ for value in "$POSTGRES_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$PGHERO_PASSWORD"; 
   done
 done
 
-for key in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD PGHERO_USERNAME PGHERO_PASSWORD DOMAIN LE_EMAIL; do
+for key in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB PANEL_USER PANEL_PASSWORD DOMAIN LE_EMAIL; do
   eval "value=\${$key:-}"
   if [ -z "$value" ]; then
     echo "setup: .env is missing required variable $key" >&2
@@ -181,9 +181,9 @@ mkdir -p dozzle
 if [ ! -f dozzle/users.yml ]; then
   echo "setup: generating dozzle/users.yml via docker"
   dozzle_image="amir20/dozzle:v10.1.1"
-  docker run --rm "$dozzle_image" generate "$GRAFANA_ADMIN_USER" \
-    --password "$GRAFANA_ADMIN_PASSWORD" \
-    --email "${GRAFANA_ADMIN_USER}@localhost" \
+  docker run --rm "$dozzle_image" generate "$PANEL_USER" \
+    --password "$PANEL_PASSWORD" \
+    --email "${PANEL_USER}@localhost" \
     --name "Admin" > dozzle/users.yml
 else
   echo "setup: dozzle/users.yml already exists, leaving it"

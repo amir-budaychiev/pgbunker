@@ -1,8 +1,11 @@
 # Rendered by scripts/nginx-setup.sh to /etc/nginx/sites-available/pgbunker.
 # Variables substituted: ${DOMAIN}
 #
-# This file starts as HTTP-only. `certbot --nginx` then duplicates each server
-# block as HTTPS with the issued certificate and adds HTTP->HTTPS redirects.
+# HTTP-only at first. `certbot --nginx` then clones this block as HTTPS with
+# the issued certificate and adds the HTTP->HTTPS redirect.
+#
+# One subdomain, path-routed: panels live under /grafana, /pghero, /dozzle.
+# Each app is told its own base path, so links and assets stay prefixed.
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -11,9 +14,16 @@ map $http_upgrade $connection_upgrade {
 
 server {
     listen 80;
-    server_name grafana.${DOMAIN};
+    server_name ${DOMAIN};
 
-    location / {
+    # Landing page with links to the panels.
+    location = / {
+        root /var/www/pgbunker;
+        try_files /index.html =404;
+    }
+
+    # Grafana — GF_SERVER_SERVE_FROM_SUB_PATH keeps it under /grafana.
+    location /grafana {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
@@ -25,33 +35,27 @@ server {
         proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
     }
-}
 
-server {
-    listen 80;
-    server_name pghero.${DOMAIN};
-
-    location / {
+    # PgHero — RAILS_RELATIVE_URL_ROOT=/pghero.
+    location /pghero {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
-}
 
-server {
-    listen 80;
-    server_name dozzle.${DOMAIN};
-
-    location / {
+    # Dozzle — DOZZLE_BASE=/dozzle. Streams logs via WebSocket/SSE.
+    location /dozzle {
         proxy_pass http://127.0.0.1:8888;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Dozzle streams logs via Server-Sent Events
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_buffering    off;
         proxy_read_timeout 3600s;
     }

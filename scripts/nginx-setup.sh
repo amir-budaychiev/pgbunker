@@ -39,6 +39,10 @@ PGBOUNCER_PUBLIC="${PGBOUNCER_PUBLIC:-false}"
 PGBOUNCER_UPSTREAM_PORT="${PGBOUNCER_UPSTREAM_PORT:-16432}"
 PGBOUNCER_PUBLIC_PORT="${PGBOUNCER_PUBLIC_PORT:-6432}"
 PGBOUNCER_ALLOWED_CIDR="${PGBOUNCER_ALLOWED_CIDR:-}"
+PROMETHEUS_PUBLIC="${PROMETHEUS_PUBLIC:-false}"
+PROMETHEUS_PUBLIC_PORT="${PROMETHEUS_PUBLIC_PORT:-9090}"
+PROMETHEUS_UPSTREAM_PORT="${PROMETHEUS_UPSTREAM_PORT:-19090}"
+PROMETHEUS_ALLOWED_IPS="${PROMETHEUS_ALLOWED_IPS:-}"
 
 case "$PGBOUNCER_TLS" in
   true|false) ;;
@@ -70,6 +74,29 @@ if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "false" ] && [ -z "$
   echo "nginx-setup: plaintext public PgBouncer requires PGBOUNCER_ALLOWED_CIDR" >&2
   exit 1
 fi
+case "$PROMETHEUS_PUBLIC" in
+  true|false) ;;
+  *)
+    echo "nginx-setup: PROMETHEUS_PUBLIC must be true or false" >&2
+    exit 1
+    ;;
+esac
+case "$PROMETHEUS_PUBLIC_PORT" in
+  *[!0-9]*|'')
+    echo "nginx-setup: PROMETHEUS_PUBLIC_PORT must be a numeric TCP port" >&2
+    exit 1
+    ;;
+esac
+case "$PROMETHEUS_UPSTREAM_PORT" in
+  *[!0-9]*|'')
+    echo "nginx-setup: PROMETHEUS_UPSTREAM_PORT must be a numeric TCP port" >&2
+    exit 1
+    ;;
+esac
+if [ "$PROMETHEUS_PUBLIC" = "true" ] && [ -z "$PROMETHEUS_ALLOWED_IPS" ]; then
+  echo "nginx-setup: public Prometheus requires PROMETHEUS_ALLOWED_IPS (IP allowlist)" >&2
+  exit 1
+fi
 
 echo "nginx-setup: DOMAIN=$DOMAIN PGBOUNCER_PUBLIC=$PGBOUNCER_PUBLIC PGBOUNCER_TLS=$PGBOUNCER_TLS"
 
@@ -88,12 +115,9 @@ if [ -z "$server_ip" ]; then
   exit 1
 fi
 
-subdomains=("grafana.$DOMAIN" "pghero.$DOMAIN" "dozzle.$DOMAIN")
-if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "true" ]; then
-  subdomains+=("$DOMAIN")
-fi
+hostnames=("$DOMAIN")
 
-for host in "${subdomains[@]}"; do
+for host in "${hostnames[@]}"; do
   dns_ip="$(dig +short "$host" A | tail -n1)"
   if [ -z "$dns_ip" ]; then
     echo "nginx-setup: DNS for $host does not resolve. Create an A-record -> $server_ip and wait for propagation." >&2
@@ -104,7 +128,7 @@ for host in "${subdomains[@]}"; do
     exit 1
   fi
 done
-echo "nginx-setup: DNS OK for ${subdomains[*]}"
+echo "nginx-setup: DNS OK for ${hostnames[*]}"
 
 # ---- render templates ----
 render() {
@@ -135,6 +159,10 @@ fi
 ln -sf /etc/nginx/sites-available/pgbunker /etc/nginx/sites-enabled/pgbunker
 rm -f /etc/nginx/sites-enabled/default
 
+# ---- landing page served at / ----
+mkdir -p /var/www/pgbunker
+cp nginx/landing.html /var/www/pgbunker/index.html
+
 # ---- ensure top-level stream include exists in nginx.conf ----
 if [ "$PGBOUNCER_PUBLIC" = "true" ] && ! grep -q "streams-enabled" /etc/nginx/nginx.conf; then
   cat >> /etc/nginx/nginx.conf <<'NGINX_APPEND'
@@ -164,24 +192,43 @@ if [ "$PGBOUNCER_PUBLIC" = "true" ]; then
     ufw allow from "$PGBOUNCER_ALLOWED_CIDR" to any port "$PGBOUNCER_PUBLIC_PORT" proto tcp >/dev/null
   fi
 fi
+ufw --force delete allow "$PROMETHEUS_PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
+if [ "$PROMETHEUS_PUBLIC" = "true" ]; then
+  for prometheus_ip in $PROMETHEUS_ALLOWED_IPS; do
+    ufw allow from "$prometheus_ip" to any port "$PROMETHEUS_PUBLIC_PORT" proto tcp >/dev/null
+  done
+fi
 ufw --force enable >/dev/null
 
 # ---- certbot ----
-certbot_domains=(-d "grafana.$DOMAIN" -d "pghero.$DOMAIN" -d "dozzle.$DOMAIN")
-if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "true" ]; then
-  certbot_domains+=(-d "$DOMAIN")
-fi
+certbot_domains=(-d "$DOMAIN")
 
 certbot --nginx \
   --non-interactive --agree-tos --redirect \
   -m "$LE_EMAIL" \
   "${certbot_domains[@]}"
 
+# ---- optional public Prometheus (TLS-terminated by nginx, IP-allowlisted) ----
+# Enabled only after certbot, because the server block references the live cert.
+if [ "$PROMETHEUS_PUBLIC" = "true" ]; then
+  allow_directives=""
+  for prometheus_ip in $PROMETHEUS_ALLOWED_IPS; do
+    allow_directives="${allow_directives}    allow ${prometheus_ip};"$'\n'
+  done
+  export PROMETHEUS_ALLOW_DIRECTIVES="${allow_directives%$'\n'}"
+  render nginx/pgbunker-prometheus.conf.tmpl /etc/nginx/sites-available/pgbunker-prometheus
+  ln -sf /etc/nginx/sites-available/pgbunker-prometheus /etc/nginx/sites-enabled/pgbunker-prometheus
+  nginx -t
+  systemctl reload nginx
+else
+  rm -f /etc/nginx/sites-enabled/pgbunker-prometheus /etc/nginx/sites-available/pgbunker-prometheus
+fi
+
 # ---- optional PgBouncer TLS deploy-hook ----
 hook_path="/etc/letsencrypt/renewal-hooks/deploy/pgbunker.sh"
 if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "true" ]; then
   # Certbot names the cert after the first -d argument.
-  cert_name="grafana.$DOMAIN"
+  cert_name="$DOMAIN"
   mkdir -p "$(dirname "$hook_path")"
 
   cat > "$hook_path" <<HOOK
@@ -208,9 +255,13 @@ fi
 
 echo ""
 echo "nginx-setup: done."
-echo "  Grafana: https://grafana.$DOMAIN"
-echo "  PgHero:  https://pghero.$DOMAIN"
-echo "  Dozzle:  https://dozzle.$DOMAIN"
+echo "  Home:    https://$DOMAIN/"
+echo "  Grafana: https://$DOMAIN/grafana"
+echo "  PgHero:  https://$DOMAIN/pghero"
+echo "  Dozzle:  https://$DOMAIN/dozzle"
+if [ "$PROMETHEUS_PUBLIC" = "true" ]; then
+  echo "  Prom:    https://$DOMAIN:$PROMETHEUS_PUBLIC_PORT/   (allowlisted: $PROMETHEUS_ALLOWED_IPS)"
+fi
 if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "true" ]; then
   echo "  DB:      postgresql://USER:PASS@$DOMAIN:$PGBOUNCER_PUBLIC_PORT/DB?sslmode=require"
 elif [ "$PGBOUNCER_PUBLIC" = "true" ]; then

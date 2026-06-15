@@ -1,0 +1,30 @@
+# Rendered by scripts/nginx-setup.sh AFTER certbot issues the cert, to
+# /etc/nginx/sites-available/pgbunker-prometheus. It must be enabled only once
+# the certificate exists, otherwise `nginx -t` fails on the missing cert.
+#
+# TLS-terminates Prometheus on a dedicated public port and proxies to the
+# 127.0.0.1 upstream that the container publishes. Access is restricted by an
+# IP allowlist (defense-in-depth alongside UFW).
+#
+# Variables: ${DOMAIN} ${PROMETHEUS_PUBLIC_PORT} ${PROMETHEUS_UPSTREAM_PORT}
+#            ${PROMETHEUS_ALLOW_DIRECTIVES}
+
+server {
+    listen ${PROMETHEUS_PUBLIC_PORT} ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    # IP allowlist — only these sources may reach Prometheus.
+${PROMETHEUS_ALLOW_DIRECTIVES}
+    deny all;
+
+    location / {
+        proxy_pass http://127.0.0.1:${PROMETHEUS_UPSTREAM_PORT};
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

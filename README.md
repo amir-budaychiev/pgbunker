@@ -41,13 +41,10 @@ docker compose up -d              # start the stack
 sudo ./scripts/nginx-setup.sh     # install nginx + certbot, HTTPS, UFW
 ```
 
-Before the last command, point these DNS A-records at your VPS:
+Before the last command, point a single DNS A-record at your VPS:
 
 ```
-grafana.<DOMAIN>
-pghero.<DOMAIN>
-dozzle.<DOMAIN>
-<DOMAIN>                          # only if PGBOUNCER_PUBLIC=true and PGBOUNCER_TLS=true
+<DOMAIN>                          # e.g. pgbunker.yourdomain.com
 ```
 
 That's it. Certificates auto-renew via the `certbot.timer` systemd unit that ships with the certbot package — you don't have to schedule anything.
@@ -63,12 +60,14 @@ docker compose --profile backup up -d backup
 
 ## Services
 
-| Service   | URL                                      | Notes                          |
-| --------- | ---------------------------------------- | ------------------------------ |
-| Grafana   | `https://grafana.<DOMAIN>`               | Credentials from `.env`        |
-| PgHero    | `https://pghero.<DOMAIN>`                | Credentials from `.env`        |
-| Dozzle    | `https://dozzle.<DOMAIN>`                | Docker log viewer              |
-| PgBouncer | `127.0.0.1:<PGBOUNCER_UPSTREAM_PORT>`   | Private application endpoint   |
+| Service    | URL                                    | Notes                            |
+| ---------- | -------------------------------------- | -------------------------------- |
+| Home       | `https://<DOMAIN>/`                    | Landing page with links          |
+| Grafana    | `https://<DOMAIN>/grafana`             | Shared panel login from `.env`   |
+| PgHero     | `https://<DOMAIN>/pghero`              | Shared panel login from `.env`   |
+| Dozzle     | `https://<DOMAIN>/dozzle`              | Shared panel login from `.env`   |
+| Prometheus | `https://<DOMAIN>:9090/`               | Off by default; IP-allowlisted   |
+| PgBouncer  | `127.0.0.1:<PGBOUNCER_UPSTREAM_PORT>`  | Private application endpoint     |
 
 Private connection string on the VPS or through an SSH tunnel:
 
@@ -86,7 +85,7 @@ postgresql://user:password@<DOMAIN>:6432/dbname?sslmode=require
 
 ## TLS
 
-Admin UIs are served over HTTPS by host nginx with a multi-SAN Let's Encrypt certificate. Nothing to do after `nginx-setup.sh`.
+Panels are served over HTTPS by host nginx with a single Let's Encrypt certificate for `<DOMAIN>`, path-routed under `/grafana`, `/pghero`, `/dozzle`. The same certificate also covers the public PgBouncer and Prometheus endpoints on their own ports. Nothing to do after `nginx-setup.sh`.
 
 **Public Postgres access is off by default.** Postgres uses a plaintext handshake to negotiate SSL (it's a protocol quirk), so nginx cannot terminate TLS for it. PgBouncer has to do it itself.
 
@@ -111,7 +110,7 @@ sudo ./scripts/nginx-setup.sh
 `setup.sh` and `nginx-setup.sh` handle the rest:
 
 1. `setup.sh` adds the TLS block to `pgbouncer.ini` and generates a self-signed placeholder certificate so PgBouncer can start.
-2. `nginx-setup.sh` includes `<DOMAIN>` in the certbot request alongside the admin subdomains, installs a certbot deploy-hook at `/etc/letsencrypt/renewal-hooks/deploy/pgbunker.sh`, and opens `PGBOUNCER_PUBLIC_PORT`. The hook copies renewed certs into `pgbouncer/certs/`, restricts the private key permissions, and sends `SIGHUP` to PgBouncer. This happens automatically every 60 days for the life of the VPS.
+2. `nginx-setup.sh` issues the `<DOMAIN>` certificate, installs a certbot deploy-hook at `/etc/letsencrypt/renewal-hooks/deploy/pgbunker.sh`, and opens `PGBOUNCER_PUBLIC_PORT`. The hook copies renewed certs into `pgbouncer/certs/`, restricts the private key permissions, and sends `SIGHUP` to PgBouncer. This happens automatically every 60 days for the life of the VPS.
 
 If you intentionally need a plaintext public PgBouncer endpoint — for example, over a private datacenter network — set an allowlist instead of opening it to the world:
 
@@ -122,6 +121,22 @@ PGBOUNCER_ALLOWED_CIDR=<APP_SERVER_IP>/32
 ```
 
 SCRAM-SHA-256 still protects the password during authentication, but query traffic is plaintext. Use this mode only on a trusted private network or a tightly scoped allowlist.
+
+---
+
+## Prometheus access
+
+By default Prometheus is private — it stays on the Docker network and you read its data through Grafana. To let another server (a central Prometheus, a remote Grafana datasource) reach it directly, expose it on its own port:
+
+```env
+PROMETHEUS_PUBLIC=true
+PROMETHEUS_PUBLIC_PORT=9090
+PROMETHEUS_ALLOWED_IPS=203.0.113.10          # space-separated allowlist, required
+```
+
+Then re-run `./scripts/setup.sh && docker compose up -d && sudo ./scripts/nginx-setup.sh`.
+
+Host nginx TLS-terminates Prometheus on `PROMETHEUS_PUBLIC_PORT` with the same Let's Encrypt certificate and proxies to a `127.0.0.1` upstream. Prometheus has no authentication of its own, so access is locked to `PROMETHEUS_ALLOWED_IPS` in **two** layers — UFW and an nginx allowlist. Connect to it as `https://<DOMAIN>:9090/`.
 
 ---
 
@@ -268,12 +283,14 @@ Provisioned dashboards are read-only in the UI — the JSON files in the repo ar
 ```
 22    SSH
 80    nginx (ACME challenge + HTTP → HTTPS redirect)
-443   nginx (admin UIs)
+443   nginx (panels: /grafana, /pghero, /dozzle)
 ```
 
 If `PGBOUNCER_PUBLIC=true`, it also enables nginx stream on `PGBOUNCER_PUBLIC_PORT`. With TLS it opens that port publicly; without TLS it requires `PGBOUNCER_ALLOWED_CIDR` and opens the port only for that source.
 
-Everything else — Postgres, Prometheus, all exporters, Grafana, PgHero, Dozzle, and private PgBouncer — binds to `127.0.0.1` or stays inside the Docker bridge. Only nginx talks to the public internet.
+If `PROMETHEUS_PUBLIC=true`, it opens `PROMETHEUS_PUBLIC_PORT` (default 9090) only for the IPs in `PROMETHEUS_ALLOWED_IPS`.
+
+Everything else — Postgres, all exporters, Grafana, PgHero, Dozzle, private PgBouncer, and private Prometheus — binds to `127.0.0.1` or stays inside the Docker bridge. Only nginx talks to the public internet.
 
 ---
 
