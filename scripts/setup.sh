@@ -124,6 +124,15 @@ fi
 echo "setup: rendering pgbouncer/userlist.txt"
 render pgbouncer/userlist.txt.tmpl pgbouncer/userlist.txt
 chmod 600 pgbouncer/userlist.txt
+# PgBouncer runs as uid 70 and reads userlist.txt at auth time; the container
+# user table differs from the host. Hand the file to uid 70 so it stays 600 but
+# the pooler can still read it. setup.sh may run unprivileged, so use docker.
+if command -v docker >/dev/null 2>&1; then
+  docker run --rm -v "$PWD/pgbouncer:/pb" alpine:3.19 chown 70:70 /pb/userlist.txt
+else
+  echo "setup: docker is required to set userlist.txt ownership for container uid 70" >&2
+  exit 1
+fi
 
 # ---- keep PGBOUNCER_EXPORTER_SSLMODE in .env synced with PGBOUNCER_TLS ----
 # lib/pq (used by pgbouncer-exporter) does not accept "prefer", so we have to
