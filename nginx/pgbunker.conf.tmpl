@@ -23,12 +23,19 @@ server {
     }
 
     # Grafana — GF_SERVER_SERVE_FROM_SUB_PATH keeps it under /grafana.
+    # auth_basic here is the ONLY login for all four panels (see /pghero,
+    # /dozzle below, and vmui's /select/ in the VPS-local snippet) — same
+    # realm + same htpasswd file everywhere, so the browser prompts once.
     location /grafana {
+        auth_basic           "PgBunker panels";
+        auth_basic_user_file /etc/nginx/pgbunker-panels.htpasswd;
+
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-WEBAUTH-USER    $remote_user;
 
         # Grafana Live uses WebSocket
         proxy_http_version 1.1;
@@ -36,8 +43,12 @@ server {
         proxy_set_header Connection $connection_upgrade;
     }
 
-    # PgHero — RAILS_RELATIVE_URL_ROOT=/pghero.
+    # PgHero — RAILS_RELATIVE_URL_ROOT=/pghero. No PGHERO_USERNAME/PASSWORD
+    # anymore (see docker-compose.yml) — auth_basic below is the only gate.
     location /pghero {
+        auth_basic           "PgBunker panels";
+        auth_basic_user_file /etc/nginx/pgbunker-panels.htpasswd;
+
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
@@ -47,11 +58,15 @@ server {
 
     # Dozzle — DOZZLE_BASE=/dozzle. Streams logs via WebSocket/SSE.
     location /dozzle {
+        auth_basic           "PgBunker panels";
+        auth_basic_user_file /etc/nginx/pgbunker-panels.htpasswd;
+
         proxy_pass http://127.0.0.1:8888;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Remote-User       $remote_user;
 
         proxy_http_version 1.1;
         proxy_set_header Upgrade    $http_upgrade;
