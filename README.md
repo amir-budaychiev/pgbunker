@@ -63,9 +63,9 @@ docker compose --profile backup up -d backup
 | Service    | URL                                    | Notes                            |
 | ---------- | -------------------------------------- | -------------------------------- |
 | Home       | `https://<DOMAIN>/`                    | Landing page with links          |
-| Grafana    | `https://<DOMAIN>/grafana`             | Shared panel login from `.env`   |
-| PgHero     | `https://<DOMAIN>/pghero`              | Shared panel login from `.env`   |
-| Dozzle     | `https://<DOMAIN>/dozzle`              | Shared panel login from `.env`   |
+| Grafana    | `https://<DOMAIN>/grafana`             | One login for all four panels    |
+| PgHero     | `https://<DOMAIN>/pghero`              | One login for all four panels    |
+| Dozzle     | `https://<DOMAIN>/dozzle`              | One login for all four panels    |
 | Prometheus | `https://<DOMAIN>:9090/`               | Off by default; IP-allowlisted   |
 | PgBouncer  | `127.0.0.1:<PGBOUNCER_UPSTREAM_PORT>`  | Private application endpoint     |
 
@@ -80,6 +80,12 @@ Public TLS endpoint on the default public port, only after `PGBOUNCER_PUBLIC=tru
 ```
 postgresql://user:password@<DOMAIN>:6432/dbname?sslmode=require
 ```
+
+---
+
+## Single sign-on for panels
+
+Grafana, PgHero, Dozzle, and the VictoriaLogs UI (vmui) all sit behind one nginx `auth_basic` realm (`PgBunker panels`), backed by one htpasswd file generated from `PANEL_USER`/`PANEL_PASSWORD` (`nginx-setup.sh` regenerates it on every run). The browser prompts once per session and reuses it for all four paths. Each app is configured to trust the username nginx already authenticated instead of showing its own login form — Grafana via `auth.proxy` (header `X-WEBAUTH-USER`), Dozzle via its `forward-proxy` auth provider (header `Remote-User`), and PgHero by simply having no `PGHERO_USERNAME`/`PGHERO_PASSWORD` set. This is still HTTP Basic Auth (the browser's native popup), not a styled login page with long-lived sessions — that would need a separate auth proxy (Authelia, oauth2-proxy), deliberately not added here.
 
 ---
 

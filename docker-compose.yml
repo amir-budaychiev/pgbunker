@@ -222,6 +222,16 @@ services:
       GF_SERVER_ROOT_URL: https://${DOMAIN}/grafana
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # Single sign-on: trust the user nginx already authenticated via
+      # auth_basic (forwarded as X-WEBAUTH-USER) instead of Grafana's own
+      # login form. Grafana's port is 127.0.0.1-only — nginx is the only
+      # thing that can ever reach it, so no extra GF_AUTH_PROXY_WHITELIST.
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
@@ -253,9 +263,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
-      PGHERO_USERNAME: ${PANEL_USER}
-      PGHERO_PASSWORD: ${PANEL_PASSWORD}
       RAILS_RELATIVE_URL_ROOT: /pghero
+      # No PGHERO_USERNAME/PGHERO_PASSWORD: PgHero's basic auth only
+      # activates when those are set. nginx's auth_basic on /pghero is now
+      # the only gate (single sign-on with Grafana/Dozzle/vmui).
     ports:
       - "${ADMIN_BIND:-127.0.0.1}:8080:8080"
     networks:
@@ -274,7 +285,10 @@ services:
     image: amir20/dozzle:v10.1.1
     restart: unless-stopped
     environment:
-      DOZZLE_AUTH_PROVIDER: simple
+      # nginx's auth_basic on /dozzle is the gate; forward-proxy just reads
+      # the Remote-User header nginx sets so Dozzle's UI shows who's logged
+      # in, without its own login screen.
+      DOZZLE_AUTH_PROVIDER: forward-proxy
       DOZZLE_BASE: /dozzle
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
