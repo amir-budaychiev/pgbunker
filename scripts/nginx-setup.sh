@@ -212,12 +212,33 @@ fi
 ufw --force enable >/dev/null
 
 # ---- certbot ----
+# Remove any existing pgbunker-prometheus site FIRST: certbot's --nginx plugin
+# scans every enabled site for a matching server_name, and pgbunker-prometheus
+# already carries `ssl_certificate` lines for this exact domain (baked into its
+# own template, not certbot-managed despite the comment). On a re-run, certbot
+# sees that as "already satisfied" and skips the real (pgbunker) site entirely
+# — leaving it with no HTTPS block at all. It's regenerated fresh below
+# regardless (when PROMETHEUS_PUBLIC=true), so removing it here loses nothing.
+rm -f /etc/nginx/sites-enabled/pgbunker-prometheus /etc/nginx/sites-available/pgbunker-prometheus
+
 certbot_domains=(-d "$DOMAIN")
 
 certbot --nginx \
   --non-interactive --agree-tos --redirect \
   -m "$LE_EMAIL" \
   "${certbot_domains[@]}"
+
+# ---- sanity check: catch a self-redirect loop ----
+# `nginx -t` only validates syntax — a server block that redirects to its own
+# exact URL (seen once: certbot duplicated its `if ($host = ...) return 301`
+# snippet into both the HTTPS and HTTP blocks instead of just the HTTP one)
+# is syntactically valid but functionally broken, and would otherwise ship
+# silently.
+redirect_target="$(curl -s -o /dev/null -w '%{redirect_url}' "https://$DOMAIN/" || true)"
+if [ "$redirect_target" = "https://$DOMAIN/" ]; then
+  echo "nginx-setup: ERROR - https://$DOMAIN/ redirects to itself. Check /etc/nginx/sites-available/pgbunker for a duplicated 'if (\$host = ...) return 301' block — it should appear only in the plain :80 catch-all server block, not the :443 ssl one." >&2
+  exit 1
+fi
 
 # ---- optional public Prometheus (TLS-terminated by nginx, IP-allowlisted) ----
 # Enabled only after certbot, because the server block references the live cert.
