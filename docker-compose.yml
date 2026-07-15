@@ -132,6 +132,7 @@ services:
       - db_net
     command:
       - "--web.listen-address=:9127"
+      - "--log.level=warn"
       # PGBOUNCER_EXPORTER_SSLMODE is auto-derived from PGBOUNCER_TLS by scripts/setup.sh
       - "--pgBouncer.connectionString=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=${PGBOUNCER_EXPORTER_SSLMODE}"
     deploy:
