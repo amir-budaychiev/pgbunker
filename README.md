@@ -190,12 +190,12 @@ Edit `pgbouncer/pgbouncer.ini.tmpl`, then re-run `./scripts/setup.sh`.
 | `PGBOUNCER_EXPORTER_MEM_LIMIT` | `48m`    | `64m`              | `96m`    |
 | `NODE_EXPORTER_MEM_LIMIT`      | `48m`    | `64m`              | `96m`    |
 | `PROMETHEUS_MEM_LIMIT`         | `256m`   | `512m`             | `1024m`  |
-| `GRAFANA_MEM_LIMIT`            | `192m`   | `256m`             | `512m`   |
-| `PGHERO_MEM_LIMIT`             | `256m`   | `384m`             | `512m`   |
+| `GRAFANA_MEM_LIMIT`            | `192m`   | `320m`             | `512m`   |
+| `PGHERO_MEM_LIMIT`             | `256m`   | `448m`             | `512m`   |
 | `DOZZLE_MEM_LIMIT`             | `96m`    | `128m`             | `192m`   |
 | `BACKUP_MEM_LIMIT`             | `192m`   | `256m`             | `384m`   |
 
-Total cap (no backup running): **~1.8 GB / 3.1 GB / 5.8 GB**. Idle use is typically 40–60 % of the caps.
+Total cap (no backup running): **~1.8 GB / 3.23 GB / 5.8 GB**. Idle use is typically 40–60 % of the caps.
 
 ### Prometheus retention
 
