@@ -1,0 +1,52 @@
+# Rendered by scripts/setup.sh to vector/vector.yaml.
+# Variables substituted: ${LOGS_SERVER_NAME}
+#
+# Reads every container's stdout/stderr on this host and ships it to
+# VictoriaLogs. The three exporters are excluded on purpose: their output is
+# scrape noise, and Vector must not read its own logs.
+#
+# NOTE: "every container on this host" is literal — if you run other workloads
+# on the same box, their logs land here too. That is usually what you want from
+# a log host. To collect only PgBunker's own containers, replace the
+# exclude_containers block below with:
+#
+#     include_containers:
+#       - pgbunker-
+
+sources:
+  docker:
+    type: docker_logs
+    exclude_containers:
+      - pgbunker-vector
+      - pgbunker-postgres-exporter
+      - pgbunker-pgbouncer-exporter
+      - pgbunker-node-exporter
+
+transforms:
+  label:
+    type: remap
+    inputs: [docker]
+    source: |
+      .server = "${LOGS_SERVER_NAME}"
+      .log_type = "app"
+      # Stable id: strip the compose replica suffix so the name survives a
+      # recreate. pgbunker-grafana-1 becomes pgbunker-grafana.
+      .service = replace(string!(.container_name), r'-[0-9]+$', "")
+
+sinks:
+  vlogs:
+    type: elasticsearch
+    inputs: [label]
+    endpoints:
+      - http://victorialogs:9428/insert/elasticsearch/
+    api_version: v8
+    compression: gzip
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      # Streams are keyed on stable fields only. container_name is kept as an
+      # ordinary field but must never become a stream field: it changes on
+      # every recreate and would shatter one service into dozens of streams.
+      _stream_fields: server,service,log_type
