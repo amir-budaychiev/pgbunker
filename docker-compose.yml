@@ -16,6 +16,11 @@ services:
       - "-c"
       - "pg_stat_statements.track=all"
       - "-c"
+      # Default is just time and pid. Adding user@database is what makes a log
+      # line searchable back to the database it came from. Trailing space is
+      # deliberate: it separates the prefix from the message.
+      - "log_line_prefix=%m [%p] %q%u@%d "
+      - "-c"
       - "max_connections=${PG_MAX_CONNECTIONS}"
       - "-c"
       - "shared_buffers=${PG_SHARED_BUFFERS}"
@@ -233,6 +238,9 @@ services:
       GF_AUTH_PROXY_AUTO_SIGN_UP: "false"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_AUTH_BASIC_ENABLED: "false"
+      # Empty by default. Set GRAFANA_PLUGINS=victoriametrics-logs-datasource
+      # in .env when you enable the logs profile.
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
@@ -291,15 +299,84 @@ services:
       # in, without its own login screen.
       DOZZLE_AUTH_PROVIDER: forward-proxy
       DOZZLE_BASE: /dozzle
+      # Optional: other hosts running a Dozzle agent, so their containers show
+      # up in this same UI. Empty is fine — Dozzle then serves only this host.
+      DOZZLE_REMOTE_AGENT: ${DOZZLE_REMOTE_AGENT:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./dozzle/users.yml:/data/users.yml:ro
+      # Fail loudly if setup.sh has not generated this yet, instead of letting
+      # Docker create a directory with that name.
+      - type: bind
+        source: ./dozzle/users.yml
+        target: /data/users.yml
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "${ADMIN_BIND:-127.0.0.1}:8888:8080"
     deploy:
       resources:
         limits:
           memory: ${DOZZLE_MEM_LIMIT}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.51.0
+    profiles:
+      - logs
+    restart: unless-stopped
+    command:
+      - "-storageDataPath=/victoria-logs-data"
+      - "-retentionPeriod=${LOGS_RETENTION:-14d}"
+      - "-loggerFormat=json"
+    volumes:
+      - victorialogs_data:/victoria-logs-data
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:9428:9428"
+    networks:
+      - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${VICTORIALOGS_MEM_LIMIT:-256m}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "7"
+
+  vector:
+    image: timberio/vector:0.56.0-debian
+    profiles:
+      - logs
+    restart: unless-stopped
+    depends_on:
+      victorialogs:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Long syntax on purpose. With the short form, Docker silently creates a
+      # DIRECTORY named vector.yaml when the file is missing — which happens
+      # whenever someone runs `--profile logs up` before setup.sh rendered it.
+      # setup.sh then cannot write the file at all and the stack wedges.
+      # create_host_path: false turns that into an immediate, readable error.
+      - type: bind
+        source: ./vector/vector.yaml
+        target: /etc/vector/vector.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - vector_data:/var/lib/vector
+    networks:
+      - db_net
+    deploy:
+      resources:
+        limits:
+          memory: ${VECTOR_MEM_LIMIT:-128m}
     logging:
       driver: "json-file"
       options:
@@ -353,3 +430,5 @@ volumes:
   pg_data:
   prometheus_data:
   grafana_data:
+  victorialogs_data:
+  vector_data:
