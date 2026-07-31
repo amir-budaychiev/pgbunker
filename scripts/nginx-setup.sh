@@ -161,8 +161,8 @@ echo "nginx-setup: DNS OK for ${hostnames[*]}"
 
 # ---- shared basic-auth file for all four web panels ----
 # Grafana, PgHero, Dozzle, and vmui all check the SAME realm/file, so the
-# browser prompts once and reuses it for all four — see docs/superpowers/plans
-# /2026-07-15-unified-panel-login.md for the full design.
+# browser prompts once and reuses it for all four. See "Single sign-on for
+# panels" in the README.
 : "${PANEL_USER:?PANEL_USER is not set in .env}"
 : "${PANEL_PASSWORD:?PANEL_PASSWORD is not set in .env}"
 echo "nginx-setup: generating shared panel htpasswd for $PANEL_USER"

@@ -275,7 +275,8 @@ services:
       RAILS_RELATIVE_URL_ROOT: /pghero
       # No PGHERO_USERNAME/PGHERO_PASSWORD: PgHero's basic auth only
       # activates when those are set. nginx's auth_basic on /pghero is now
-      # the only gate (single sign-on with Grafana/Dozzle/vmui).
+      # the only gate — the same one that guards Grafana, Dozzle and, when
+      # the logs profile is on, vmui.
     ports:
       - "${ADMIN_BIND:-127.0.0.1}:8080:8080"
     networks:
