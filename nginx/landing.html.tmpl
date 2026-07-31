@@ -4,14 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PgBunker</title>
+  <link rel="icon" href="data:,">
   <style>
     body { margin:0; font-family: system-ui, -apple-system, sans-serif; background:#0f1419;
            color:#e6e6e6; display:flex; min-height:100vh; align-items:center; justify-content:center; }
     .wrap { text-align:center; padding:24px; }
     h1 { font-weight:600; letter-spacing:1px; margin:0 0 4px; }
     p { color:#8a94a6; margin:0 0 32px; }
-    .panels { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; }
-    a.card { display:block; padding:20px 32px; min-width:140px; background:#1a2129;
+    .panels { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; max-width:680px; }
+    a.card { display:block; padding:20px 32px; min-width:150px; background:#1a2129;
              border:1px solid #2a333f; border-radius:10px; color:#e6e6e6;
              text-decoration:none; transition:border-color .15s, background .15s; }
     a.card:hover { background:#222b35; border-color:#3d8bff; }
@@ -27,6 +28,7 @@
       <a class="card" href="/grafana"><span>Grafana</span><small>Dashboards</small></a>
       <a class="card" href="/pghero"><span>PgHero</span><small>Query insights</small></a>
       <a class="card" href="/dozzle"><span>Dozzle</span><small>Live logs</small></a>
+${LOGS_CARD}
     </div>
   </div>
 </body>

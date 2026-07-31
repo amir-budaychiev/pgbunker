@@ -230,8 +230,15 @@ ln -sf /etc/nginx/sites-available/pgbunker /etc/nginx/sites-enabled/pgbunker
 rm -f /etc/nginx/sites-enabled/default
 
 # ---- landing page served at / ----
+# The VictoriaLogs card only exists when the logs profile is on, otherwise it
+# would link to a 404.
+if [ "$LOGS_ENABLED" = "true" ]; then
+  export LOGS_CARD='      <a class="card" href="/select/vmui/"><span>VictoriaLogs</span><small>Log search</small></a>'
+else
+  export LOGS_CARD=""
+fi
 mkdir -p /var/www/pgbunker
-cp nginx/landing.html /var/www/pgbunker/index.html
+render nginx/landing.html.tmpl /var/www/pgbunker/index.html
 
 # ---- ensure top-level stream include exists in nginx.conf ----
 if [ "$PGBOUNCER_PUBLIC" = "true" ] && ! grep -q "streams-enabled" /etc/nginx/nginx.conf; then
