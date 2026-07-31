@@ -16,6 +16,10 @@ server {
     listen 80;
     server_name ${DOMAIN};
 
+    # Centralized logs. Always included; contains only a comment when
+    # LOGS_ENABLED=false. Rendered by scripts/nginx-setup.sh.
+    include /etc/nginx/snippets/pgbunker-logs.conf;
+
     # Landing page with links to the panels.
     location = / {
         root /var/www/pgbunker;
@@ -24,7 +28,7 @@ server {
 
     # Grafana — GF_SERVER_SERVE_FROM_SUB_PATH keeps it under /grafana.
     # auth_basic here is the ONLY login for all four panels (see /pghero,
-    # /dozzle below, and vmui's /select/ in the VPS-local snippet) — same
+    # /dozzle below, and vmui's /select/ in the logs snippet) — same
     # realm + same htpasswd file everywhere, so the browser prompts once.
     location /grafana {
         auth_basic           "PgBunker panels";

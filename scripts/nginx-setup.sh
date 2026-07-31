@@ -43,6 +43,11 @@ PROMETHEUS_PUBLIC="${PROMETHEUS_PUBLIC:-false}"
 PROMETHEUS_PUBLIC_PORT="${PROMETHEUS_PUBLIC_PORT:-9090}"
 PROMETHEUS_UPSTREAM_PORT="${PROMETHEUS_UPSTREAM_PORT:-19090}"
 PROMETHEUS_ALLOWED_IPS="${PROMETHEUS_ALLOWED_IPS:-}"
+LOGS_ENABLED="${LOGS_ENABLED:-false}"
+LOGS_INGEST_ENABLED="${LOGS_INGEST_ENABLED:-false}"
+LOGS_INGEST_ALLOWED_IPS="${LOGS_INGEST_ALLOWED_IPS:-}"
+LOGS_INGEST_USER="${LOGS_INGEST_USER:-}"
+LOGS_INGEST_PASSWORD="${LOGS_INGEST_PASSWORD:-}"
 
 case "$PGBOUNCER_TLS" in
   true|false) ;;
@@ -96,6 +101,30 @@ esac
 if [ "$PROMETHEUS_PUBLIC" = "true" ] && [ -z "$PROMETHEUS_ALLOWED_IPS" ]; then
   echo "nginx-setup: public Prometheus requires PROMETHEUS_ALLOWED_IPS (IP allowlist)" >&2
   exit 1
+fi
+case "$LOGS_ENABLED" in
+  true|false) ;;
+  *)
+    echo "nginx-setup: LOGS_ENABLED must be true or false" >&2
+    exit 1
+    ;;
+esac
+case "$LOGS_INGEST_ENABLED" in
+  true|false) ;;
+  *)
+    echo "nginx-setup: LOGS_INGEST_ENABLED must be true or false" >&2
+    exit 1
+    ;;
+esac
+if [ "$LOGS_INGEST_ENABLED" = "true" ]; then
+  if [ "$LOGS_ENABLED" != "true" ]; then
+    echo "nginx-setup: LOGS_INGEST_ENABLED=true requires LOGS_ENABLED=true" >&2
+    exit 1
+  fi
+  if [ -z "$LOGS_INGEST_ALLOWED_IPS" ] || [ -z "$LOGS_INGEST_USER" ] || [ -z "$LOGS_INGEST_PASSWORD" ]; then
+    echo "nginx-setup: log ingestion requires LOGS_INGEST_ALLOWED_IPS, LOGS_INGEST_USER and LOGS_INGEST_PASSWORD" >&2
+    exit 1
+  fi
 fi
 
 echo "nginx-setup: DOMAIN=$DOMAIN PGBOUNCER_PUBLIC=$PGBOUNCER_PUBLIC PGBOUNCER_TLS=$PGBOUNCER_TLS"
@@ -160,6 +189,36 @@ render() {
 }
 
 mkdir -p /etc/nginx/streams-enabled
+
+# ---- centralized logs snippet ----
+# Always written, so the main site template can include it unconditionally.
+mkdir -p /etc/nginx/snippets
+logs_snippet="/etc/nginx/snippets/pgbunker-logs.conf"
+if [ "$LOGS_ENABLED" = "true" ]; then
+  render nginx/pgbunker-logs.conf.tmpl "$logs_snippet"
+  if [ "$LOGS_INGEST_ENABLED" = "true" ]; then
+    ingest_allow=""
+    for ingest_ip in $LOGS_INGEST_ALLOWED_IPS; do
+      ingest_allow="${ingest_allow}    allow ${ingest_ip};"$'\n'
+    done
+    export LOGS_INGEST_ALLOW_DIRECTIVES="${ingest_allow%$'\n'}"
+    ingest_tmp="$(mktemp)"
+    render nginx/pgbunker-logs-ingest.conf.tmpl "$ingest_tmp"
+    cat "$ingest_tmp" >> "$logs_snippet"
+    rm -f "$ingest_tmp"
+
+    echo "nginx-setup: generating ingest htpasswd for $LOGS_INGEST_USER"
+    printf '%s:%s\n' "$LOGS_INGEST_USER" "$(openssl passwd -apr1 "$LOGS_INGEST_PASSWORD")" > /etc/nginx/pgbunker-ingest.htpasswd
+    chown root:www-data /etc/nginx/pgbunker-ingest.htpasswd
+    chmod 640 /etc/nginx/pgbunker-ingest.htpasswd
+  else
+    rm -f /etc/nginx/pgbunker-ingest.htpasswd
+  fi
+else
+  printf '%s\n' "# Centralized logs are off (LOGS_ENABLED=false in .env)." > "$logs_snippet"
+  rm -f /etc/nginx/pgbunker-ingest.htpasswd
+fi
+
 render nginx/pgbunker.conf.tmpl        /etc/nginx/sites-available/pgbunker
 if [ "$PGBOUNCER_PUBLIC" = "true" ]; then
   render nginx/pgbunker-stream.conf.tmpl /etc/nginx/streams-enabled/pgbunker.conf
@@ -291,6 +350,9 @@ echo "  Home:    https://$DOMAIN/"
 echo "  Grafana: https://$DOMAIN/grafana"
 echo "  PgHero:  https://$DOMAIN/pghero"
 echo "  Dozzle:  https://$DOMAIN/dozzle"
+if [ "$LOGS_ENABLED" = "true" ]; then
+  echo "  Logs:    https://$DOMAIN/select/vmui/"
+fi
 if [ "$PROMETHEUS_PUBLIC" = "true" ]; then
   echo "  Prom:    https://$DOMAIN:$PROMETHEUS_PUBLIC_PORT/   (allowlisted: $PROMETHEUS_ALLOWED_IPS)"
 fi
