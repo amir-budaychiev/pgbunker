@@ -219,6 +219,17 @@ else
   rm -f /etc/nginx/pgbunker-ingest.htpasswd
 fi
 
+# An allowlist applies in both modes. TLS says who the server is; it says
+# nothing about who may connect.
+pgbouncer_allow=""
+if [ -n "$PGBOUNCER_ALLOWED_CIDR" ]; then
+  for pgbouncer_cidr in $PGBOUNCER_ALLOWED_CIDR; do
+    pgbouncer_allow="${pgbouncer_allow}    allow ${pgbouncer_cidr};"$'\n'
+  done
+  pgbouncer_allow="${pgbouncer_allow}    deny all;"
+fi
+export PGBOUNCER_ALLOW_DIRECTIVES="$pgbouncer_allow"
+
 render nginx/pgbunker.conf.tmpl        /etc/nginx/sites-available/pgbunker
 if [ "$PGBOUNCER_PUBLIC" = "true" ]; then
   render nginx/pgbunker-stream.conf.tmpl /etc/nginx/streams-enabled/pgbunker.conf
@@ -263,10 +274,12 @@ ufw allow 443/tcp  >/dev/null
 ufw --force delete allow 6432/tcp >/dev/null 2>&1 || true
 ufw --force delete allow "$PGBOUNCER_PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
 if [ "$PGBOUNCER_PUBLIC" = "true" ]; then
-  if [ "$PGBOUNCER_TLS" = "true" ]; then
-    ufw allow "$PGBOUNCER_PUBLIC_PORT/tcp" >/dev/null
+  if [ -n "$PGBOUNCER_ALLOWED_CIDR" ]; then
+    for pgbouncer_cidr in $PGBOUNCER_ALLOWED_CIDR; do
+      ufw allow from "$pgbouncer_cidr" to any port "$PGBOUNCER_PUBLIC_PORT" proto tcp >/dev/null
+    done
   else
-    ufw allow from "$PGBOUNCER_ALLOWED_CIDR" to any port "$PGBOUNCER_PUBLIC_PORT" proto tcp >/dev/null
+    ufw allow "$PGBOUNCER_PUBLIC_PORT/tcp" >/dev/null
   fi
 fi
 ufw --force delete allow "$PROMETHEUS_PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
@@ -366,7 +379,14 @@ fi
 if [ "$PGBOUNCER_PUBLIC" = "true" ] && [ "$PGBOUNCER_TLS" = "true" ]; then
   echo "  DB:      postgresql://USER:PASS@$DOMAIN:$PGBOUNCER_PUBLIC_PORT/DB?sslmode=require"
 elif [ "$PGBOUNCER_PUBLIC" = "true" ]; then
-  echo "  DB:      postgresql://USER:PASS@$DOMAIN:$PGBOUNCER_PUBLIC_PORT/DB   (restricted to $PGBOUNCER_ALLOWED_CIDR by UFW)"
+  echo "  DB:      postgresql://USER:PASS@$DOMAIN:$PGBOUNCER_PUBLIC_PORT/DB"
 else
   echo "  DB:      private on 127.0.0.1:$PGBOUNCER_UPSTREAM_PORT; use SSH tunnel, VPN, or set PGBOUNCER_PUBLIC=true"
+fi
+if [ "$PGBOUNCER_PUBLIC" = "true" ]; then
+  if [ -n "$PGBOUNCER_ALLOWED_CIDR" ]; then
+    echo "           reachable only from: $PGBOUNCER_ALLOWED_CIDR"
+  else
+    echo "           WARNING - open to the whole internet. Set PGBOUNCER_ALLOWED_CIDR to restrict it."
+  fi
 fi

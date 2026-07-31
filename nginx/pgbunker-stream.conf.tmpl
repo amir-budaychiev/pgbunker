@@ -5,6 +5,10 @@
 # This is a plain TCP passthrough. TLS termination happens in PgBouncer itself
 # when PGBOUNCER_TLS=true (certs live in pgbouncer/certs/); nginx never
 # interprets the PostgreSQL wire protocol.
+#
+# When PGBOUNCER_ALLOWED_CIDR is set, nginx-setup.sh fills in allow/deny rules
+# here. This works in both modes: TLS proves who the server is, an allowlist
+# decides who is even allowed to knock.
 
 upstream pgbouncer {
     server 127.0.0.1:${PGBOUNCER_UPSTREAM_PORT};
@@ -12,6 +16,7 @@ upstream pgbouncer {
 
 server {
     listen ${PGBOUNCER_PUBLIC_PORT};
+${PGBOUNCER_ALLOW_DIRECTIVES}
     proxy_pass            pgbouncer;
     proxy_connect_timeout 10s;
     proxy_timeout         1h;
